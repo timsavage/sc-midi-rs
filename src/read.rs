@@ -1,5 +1,3 @@
-use crate::read::MidiEvent::SystemExclusiveStart;
-
 const STATUS_MASK: u8 = 0b1000_0000;
 const CHANNEL_MASK: u8 = 0b0000_1111;
 const SYSTEM_MASK: u8 = 0b1111_0000;
@@ -160,7 +158,7 @@ impl MidiReader {
         }
     }
 
-    fn handle_byte(&mut self, byte: u8) -> Option<MidiEvent> {
+    pub fn handle_byte(&mut self, byte: u8) -> Option<MidiEvent> {
         // Check for realtime messages
         if (byte & SYSTEM_RT_MASK) == SYSTEM_RT_MASK {
             return self.handle_system_rt_message(byte);
@@ -177,7 +175,7 @@ impl MidiReader {
         match self.phase {
             Phase::Start => {
                 // On reset ignore bytes until a status byte is received.
-                if !is_status_byte {
+                if is_status_byte {
                     self.phase = Phase::HighByte;
 
                     if (byte & SYSTEM_MASK) == SYSTEM_MASK {
