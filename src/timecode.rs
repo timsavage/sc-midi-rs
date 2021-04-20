@@ -7,7 +7,7 @@ const LSN: u8 = 0b0000_1111;
 ///
 /// Time-code framerate
 ///
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Rate {
     Film,
     PAL,
@@ -17,7 +17,7 @@ pub enum Rate {
 
 impl Rate {
     ///
-    /// From a raw MTC Quarter frame
+    /// **From a raw MTC Quarter frame**
     ///
     /// Method will handle bit shifting
     ///
@@ -30,32 +30,6 @@ impl Rate {
             _ => None,
         }
     }
-
-    ///
-    /// Value for a MTC Quarter frame
-    ///
-    fn to_event(&self) -> u4 {
-        match self {
-            Self::Film => 0b0000,
-            Self::PAL => 0b0010,
-            Self::NTSCDropFrame => 0b0100,
-            Self::NTSC => 0b0110,
-        }
-    }
-
-    ///
-    /// **Frame rate in Frames/s**
-    ///
-    /// Drop frame is rounded to 30FPS
-    ///
-    fn frame_rate(&self) -> u8 {
-        match self {
-            Self::Film => 24,
-            Self::PAL => 25,
-            Self::NTSCDropFrame => 30,
-            Self::NTSC => 30,
-        }
-    }
 }
 
 ///
@@ -63,7 +37,7 @@ impl Rate {
 ///
 /// Default rate is PAL
 ///
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct TimeCode {
     frame: u8,
     second: u8,
@@ -75,16 +49,20 @@ pub struct TimeCode {
 impl TimeCode {
     pub fn new(hour: u8, minute: u8, second: u8, frame: u8) -> Self {
         Self {
-            hour,
-            minute,
-            second,
-            frame,
-            rate: Rate::PAL,
+            hour: hour & 0b0001_1111,
+            minute: minute & 0b0011_1111,
+            second: second & 0b0011_1111,
+            frame: frame & 0b0001_1111,
+            rate: Rate::Film,
         }
     }
 
-    pub fn set_rate(&mut self, rate: Rate) {
+    ///
+    /// Set the frame rate
+    ///
+    pub fn at_rate(mut self, rate: Rate) -> Self {
         self.rate = rate;
+        self
     }
 
     ///
@@ -92,13 +70,13 @@ impl TimeCode {
     ///
     pub fn update_from_event(&mut self, piece: u3, data: u4) {
         match piece {
-            0 => self.frame = (self.frame & MSN) | (data & LSN),
-            1 => self.frame = (self.frame & LSN) | ((data & LSN) << 4),
-            2 => self.second = (self.second & MSN) | (data & LSN),
-            3 => self.second = (self.second & LSN) | ((data & LSN) << 4),
-            4 => self.minute = (self.minute & MSN) | (data & LSN),
-            5 => self.minute = (self.minute & LSN) | ((data & LSN) << 4),
-            6 => self.hour = (self.hour & MSN) | (data & LSN),
+            0 => self.frame = (self.frame & MSN) | (data & 0b1111),
+            1 => self.frame = (self.frame & LSN) | ((data & 0b0001) << 4),
+            2 => self.second = (self.second & MSN) | (data & 0b1111),
+            3 => self.second = (self.second & LSN) | ((data & 0b0011) << 4),
+            4 => self.minute = (self.minute & MSN) | (data & 0b1111),
+            5 => self.minute = (self.minute & LSN) | ((data & 0b0011) << 4),
+            6 => self.hour = (self.hour & MSN) | (data & 0b1111),
             7 => {
                 self.hour = (self.hour & LSN) | ((data & 0b0001) << 4);
                 self.rate = Rate::from_event(data).unwrap()
@@ -115,7 +93,7 @@ impl Default for TimeCode {
             second: 0,
             minute: 0,
             hour: 0,
-            rate: Rate::PAL,
+            rate: Rate::Film,
         }
     }
 }
@@ -124,7 +102,7 @@ impl Display for TimeCode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}:{}:{}{}{}",
+            "{:02}:{:02}:{:02}{}{:02}",
             self.hour,
             self.minute,
             self.second,
@@ -134,5 +112,55 @@ impl Display for TimeCode {
             },
             self.frame
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::timecode::{Rate, TimeCode};
+    use std::sync::mpsc::RecvTimeoutError::Timeout;
+
+    #[test]
+    fn test_display__where_default_is_created() {
+        let target = TimeCode::default();
+
+        let actual = format!("{}", target);
+
+        assert_eq!(actual, "00:00:00:00")
+    }
+
+    #[test]
+    fn test_display__where_new_with_film() {
+        let target = TimeCode::new(24, 59, 59, 23);
+
+        let actual = format!("{}", target);
+
+        assert_eq!(actual, "24:59:59:23")
+    }
+
+    #[test]
+    fn test_display__where_is_drop_frame() {
+        let target = TimeCode::new(9, 8, 7, 6).at_rate(Rate::NTSCDropFrame);
+
+        let actual = format!("{}", target);
+
+        assert_eq!(actual, "09:08:07;06")
+    }
+
+    #[test]
+    fn test_update_from_event() {
+        let mut target = TimeCode::default();
+
+        target.update_from_event(0, 15);
+        target.update_from_event(1, 1);
+        target.update_from_event(2, 15);
+        target.update_from_event(3, 3);
+        target.update_from_event(4, 15);
+        target.update_from_event(5, 3);
+        target.update_from_event(6, 15);
+        target.update_from_event(7, 7);
+
+        let expected = TimeCode::new(31, 63, 63, 31).at_rate(Rate::NTSC);
+        assert_eq!(target, expected)
     }
 }

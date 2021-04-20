@@ -52,6 +52,7 @@ const CHANNEL_MODE_POLYPHONIC_ON: u7 = 0x7F;
 ///
 /// Size of System Exclusive ID
 ///
+#[derive(Debug, Eq, PartialEq)]
 pub enum SysExID {
     Byte(u7),
     Word(u14),
@@ -60,6 +61,7 @@ pub enum SysExID {
 ///
 /// Generated Midi events
 ///
+#[derive(Debug, Eq, PartialEq)]
 pub enum MidiEvent {
     // Channel events
     NoteOff(Channel, u7, u7),              // Channel, Key, Velocity
@@ -236,11 +238,11 @@ impl MidiReader {
                         // Start byte is the message for system messages
                         self.message = byte;
                         return self.handle_system_message();
-                    } else {
-                        // Split start byte for channel messages
-                        self.message = byte & SYSTEM_MASK;
-                        self.channel = byte & CHANNEL_MASK;
                     }
+
+                    // Split start byte for channel messages
+                    self.message = byte & SYSTEM_MASK;
+                    self.channel = byte & CHANNEL_MASK;
                 }
                 None
             }
@@ -397,5 +399,51 @@ impl MidiReader {
                 None
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{MidiEvent, MidiReader};
+    use parameterized::parameterized;
+
+    #[parameterized(
+        bytes = {
+            // Real time
+            &[0xF8],
+            &[0xFA],
+            &[0xFB],
+            &[0xFC],
+            &[0xFE],
+            &[0xFF],
+
+            // Channel messages
+            &[0x82, 0x40, 127],
+        },
+        expected = {
+            // Real time
+            vec![MidiEvent::Clock],
+            vec![MidiEvent::Start],
+            vec![MidiEvent::Continue],
+            vec![MidiEvent::Stop],
+            vec![MidiEvent::ActiveSensing],
+            vec![MidiEvent::SystemReset],
+
+            // Channel messages
+            vec![MidiEvent::NoteOff(2, 0x40, 127)],
+        }
+    )]
+    fn handle_byte__single_event(bytes: &[u8], expected: Vec<MidiEvent>) {
+        let mut target = MidiReader::new();
+
+        let mut actual = Vec::new();
+        for byte in bytes.iter() {
+            let result = target.handle_byte(*byte);
+            if let Some(event) = result {
+                actual.push(event);
+            }
+        }
+
+        assert_eq!(actual, expected);
     }
 }
